@@ -1,0 +1,192 @@
+[1mdiff --git a/server/index.js b/server/index.js[m
+[1mindex 215c158..d24b03a 100644[m
+[1m--- a/server/index.js[m
+[1m+++ b/server/index.js[m
+[36m@@ -1,12 +1,8 @@[m
+ import 'dotenv/config'[m
+[31m-import bcrypt from 'bcryptjs'[m
+[31m-import cors from 'cors'[m
+[31m-import express from 'express'[m
+[31m-import jwt from 'jsonwebtoken'[m
+ import pg from 'pg'[m
+[32m+[m[32mimport { createApp } from './app.js'[m
+ [m
+ const { Pool } = pg[m
+[31m-const app = express()[m
+ const port = Number(process.env.PORT || 3001)[m
+ const jwtSecret = process.env.JWT_SECRET[m
+ [m
+[36m@@ -21,9 +17,6 @@[m [mif (!jwtSecret || jwtSecret.length < 32) {[m
+ [m
+ const pool = new Pool({ connectionString: process.env.DATABASE_URL })[m
+ [m
+[31m-app.use(cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }))[m
+[31m-app.use(express.json({ limit: '32kb' }))[m
+[31m-[m
+ async function initializeDatabase() {[m
+   await pool.query(`[m
+     CREATE TABLE IF NOT EXISTS users ([m
+[36m@@ -46,160 +39,9 @@[m [masync function initializeDatabase() {[m
+   `)[m
+ }[m
+ [m
+[31m-function createToken(user) {[m
+[31m-  return jwt.sign({ sub: String(user.id), email: user.email, name: user.name }, jwtSecret, { expiresIn: '7d' })[m
+[31m-}[m
+[31m-[m
+[31m-function requireAuth(request, response, next) {[m
+[31m-  const authorization = request.headers.authorization[m
+[31m-  if (!authorization?.startsWith('Bearer ')) {[m
+[31m-    return response.status(401).json({ error: 'Sign in to continue.' })[m
+[31m-  }[m
+[31m-  try {[m
+[31m-    request.user = jwt.verify(authorization.slice(7), jwtSecret)[m
+[31m-    return next()[m
+[31m-  } catch {[m
+[31m-    return response.status(401).json({ error: 'Your session expired. Please sign in again.' })[m
+[31m-  }[m
+[31m-}[m
+[31m-[m
+[31m-app.get('/api/health', async (_request, response) => {[m
+[31m-  try {[m
+[31m-    await pool.query('SELECT 1')[m
+[31m-    response.json({ status: 'ok', database: 'connected' })[m
+[31m-  } catch {[m
+[31m-    response.status(503).json({ status: 'error', database: 'unavailable' })[m
+[31m-  }[m
+[31m-})[m
+[31m-[m
+[31m-app.post('/api/auth/register', async (request, response, next) => {[m
+[31m-  try {[m
+[31m-    const name = String(request.body.name || '').trim()[m
+[31m-    const email = String(request.body.email || '').trim().toLowerCase()[m
+[31m-    const password = String(request.body.password || '')[m
+[31m-    if (name.length < 2 || name.length > 80 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) {[m
+[31m-      return response.status(400).json({ error: 'Enter your name, a valid email, and a password of at least 8 characters.' })[m
+[31m-    }[m
+[31m-    const passwordHash = await bcrypt.hash(password, 12)[m
+[31m-    const { rows } = await pool.query([m
+[31m-      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email',[m
+[31m-      [name, email, passwordHash],[m
+[31m-    )[m
+[31m-    const user = rows[0][m
+[31m-    return response.status(201).json({ token: createToken(user), user })[m
+[31m-  } catch (error) {[m
+[31m-    if (error.code === '23505') return response.status(409).json({ error: 'An account with this email already exists.' })[m
+[31m-    return next(error)[m
+[31m-  }[m
+[31m-})[m
+[31m-[m
+[31m-app.post('/api/auth/login', async (request, response, next) => {[m
+[31m-  try {[m
+[31m-    const email = String(request.body.email || '').trim().toLowerCase()[m
+[31m-    const password = String(request.body.password || '')[m
+[31m-    const { rows } = await pool.query('SELECT id, name, email, password_hash FROM users WHERE email = $1', [email])[m
+[31m-    const user = rows[0][m
+[31m-    if (!user || !(await bcrypt.compare(password, user.password_hash))) {[m
+[31m-      return response.status(401).json({ error: 'Email or password is incorrect.' })[m
+[31m-    }[m
+[31m-    return response.json({ token: createToken(user), user: { id: user.id, name: user.name, email: user.email } })[m
+[31m-  } catch (error) {[m
+[31m-    return next(error)[m
+[31m-  }[m
+[31m-})[m
+[31m-[m
+[31m-app.get('/api/expenses', requireAuth, async (request, response, next) => {[m
+[31m-  try {[m
+[31m-    const month = String(request.query.month || '')[m
+[31m-    const validMonth = /^\d{4}-\d{2}$/.test(month)[m
+[31m-    const values = [request.user.sub][m
+[31m-    let monthFilter = ''[m
+[31m-    if (validMonth) {[m
+[31m-      values.push(month)[m
+[31m-      monthFilter = " AND expense_date >= ($2 || '-01')::date AND expense_date < (($2 || '-01')::date + INTERVAL '1 month')"[m
+[31m-    }[m
+[31m-    const { rows } = await pool.query([m
+[31m-      `SELECT id, description, amount::float AS amount, category, TO_CHAR(expense_date, 'YYYY-MM-DD') AS date[m
+[31m-       FROM expenses WHERE user_id = $1${monthFilter} ORDER BY expense_date DESC, id DESC LIMIT 500`,[m
+[31m-      values,[m
+[31m-    )[m
+[31m-    return response.json(rows)[m
+[31m-  } catch (error) {[m
+[31m-    return next(error)[m
+[31m-  }[m
+[31m-})[m
+[31m-[m
+[31m-app.post('/api/expenses', requireAuth, async (request, response, next) => {[m
+[31m-  try {[m
+[31m-    const description = String(request.body.description || '').trim()[m
+[31m-    const category = String(request.body.category || '').trim()[m
+[31m-    const amount = Number(request.body.amount)[m
+[31m-    const date = String(request.body.date || '')[m
+[31m-    if (!description || description.length > 120 || !category || category.length > 40 || !Number.isFinite(amount) || amount <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {[m
+[31m-      return response.status(400).json({ error: 'Enter a description, category, valid date, and amount greater than zero.' })[m
+[31m-    }[m
+[31m-    const { rows } = await pool.query([m
+[31m-      `INSERT INTO expenses (user_id, description, amount, category, expense_date)[m
+[31m-       VALUES ($1, $2, $3, $4, $5) RETURNING id, description, amount::float AS amount, category, TO_CHAR(expense_date, 'YYYY-MM-DD') AS date`,[m
+[31m-      [request.user.sub, description, amount.toFixed(2), category, date],[m
+[31m-    )[m
+[31m-    return response.status(201).json(rows[0])[m
+[31m-  } catch (error) {[m
+[31m-    return next(error)[m
+[31m-  }[m
+[31m-})[m
+[31m-[m
+[31m-app.delete('/api/expenses/:id', requireAuth, async (request, response, next) => {[m
+[31m-  try {[m
+[31m-    const { rowCount } = await pool.query('DELETE FROM expenses WHERE id = $1 AND user_id = $2', [request.params.id, request.user.sub])[m
+[31m-    if (!rowCount) return response.status(404).json({ error: 'Expense not found.' })[m
+[31m-    return response.status(204).end()[m
+[31m-  } catch (error) {[m
+[31m-    return next(error)[m
+[31m-  }[m
+[31m-})[m
+[31m-[m
+[31m-app.get('/api/reports', requireAuth, async (request, response, next) => {[m
+[31m-  try {[m
+[31m-    const userId = request.user.sub[m
+[31m-    const [monthly, categories, totals] = await Promise.all([[m
+[31m-      pool.query([m
+[31m-        `SELECT TO_CHAR(month_start, 'Mon') AS month, TO_CHAR(month_start, 'YYYY-MM') AS key,[m
+[31m-                COALESCE(SUM(e.amount), 0)::float AS total[m
+[31m-         FROM generate_series(date_trunc('month', CURRENT_DATE) - INTERVAL '5 months', date_trunc('month', CURRENT_DATE), INTERVAL '1 month') AS month_start[m
+[31m-         LEFT JOIN expenses e ON e.user_id = $1 AND date_trunc('month', e.expense_date) = month_start[m
+[31m-         GROUP BY month_start ORDER BY month_start`,[m
+[31m-        [userId],[m
+[31m-      ),[m
+[31m-      pool.query([m
+[31m-        `SELECT category, SUM(amount)::float AS total FROM expenses[m
+[31m-         WHERE user_id = $1 AND expense_date >= date_trunc('month', CURRENT_DATE) GROUP BY category ORDER BY total DESC`,[m
+[31m-        [userId],[m
+[31m-      ),[m
+[31m-      pool.query([m
+[31m-        `SELECT COALESCE(SUM(amount), 0)::float AS total, COUNT(*)::int AS count,[m
+[31m-                COALESCE(AVG(amount), 0)::float AS average,[m
+[31m-                COALESCE(SUM(amount) FILTER (WHERE expense_date >= date_trunc('month', CURRENT_DATE)), 0)::float AS this_month,[m
+[31m-                COALESCE(SUM(amount) FILTER (WHERE expense_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month' AND expense_date < date_trunc('month', CURRENT_DATE)), 0)::float AS last_month[m
+[31m-         FROM expenses WHERE user_id = $1`,[m
+[31m-        [userId],[m
+[31m-      ),[m
+[31m-    ])[m
+[31m-    return response.json({ monthly: monthly.rows, categories: categories.rows, ...totals.rows[0] })[m
+[31m-  } catch (error) {[m
+[31m-    return next(error)[m
+[31m-  }[m
+[31m-})[m
+[31m-[m
+[31m-app.use((error, _request, response, _next) => {[m
+[31m-  console.error(error)[m
+[31m-  if (error.code === '23503' || error.code === '22007') return response.status(400).json({ error: 'Check the date and try again.' })[m
+[31m-  return response.status(500).json({ error: 'Something went wrong. Check the server log for details.' })[m
+[31m-})[m
+[31m-[m
+ initializeDatabase()[m
+[31m-  .then(() => app.listen(port, () => console.log(`Ledgerly API listening on http://localhost:${port}`)))[m
+[32m+[m[32m  .then(() => createApp({ pool, jwtSecret }).listen(port, () => console.log(`Ledgerly API listening on http://localhost:${port}`)))[m
+   .catch((error) => {[m
+     console.error('Could not initialize PostgreSQL. Check DATABASE_URL and make sure the database exists.', error.message)[m
+     process.exit(1)[m
+[31m-  })[m
+\ No newline at end of file[m
+[32m+[m[32m  })[m

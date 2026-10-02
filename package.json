@@ -8,6 +8,8 @@
     "dev:server": "node --watch server/index.js",
     "dev:client": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "node server/index.js"
   },
   "dependencies": {
@@ -28,6 +30,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "typescript": "~5.6.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^5.0.3"
   }
 }
